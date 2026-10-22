@@ -1,0 +1,7 @@
+# Automatic HTTPS (Let's Encrypt) for $DOMAIN; long-lived SSE chat streams are passed through unbuffered.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		flush_interval -1
+	}
+}

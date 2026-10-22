@@ -1,0 +1,7 @@
+{
+  "platform": "docker",
+  "app": "torobjoo",
+  "port": 3000,
+  "build": { "location": "iran" },
+  "disks": [{ "name": "store", "mountTo": "/srv/data/store" }]
+}

@@ -1,0 +1,12 @@
+packages:
+  - "."
+dangerouslyAllowAllBuilds: true
+overrides:
+  "react-day-picker": "9.8.0"
+supportedArchitectures:
+  os: ["current"]
+  cpu: ["current"]
+  libc: ["glibc"]
+publicHoistPattern:
+  - "*eslint*"
+  - "*prettier*"

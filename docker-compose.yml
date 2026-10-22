@@ -1,0 +1,28 @@
+services:
+  app:
+    build: .
+    image: torobjoo:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DEMO_SELLER_REPLY_SECONDS=${DEMO_SELLER_REPLY_SECONDS:-20}
+    volumes:
+      - store:/srv/data/store # accounts, chats, seller answers, signals survive restarts and rebuilds
+    expose:
+      - "3000"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+volumes:
+  store:
+  caddy_data:

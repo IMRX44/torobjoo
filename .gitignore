@@ -1,0 +1,31 @@
+# dependencies & build output
+node_modules
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets — never commit; copy .env.example instead
+.env
+.env.*
+!.env.example
+
+# runtime data written by the app (users, chats, inquiries)
+data/store
+
+# large unpacked catalog (rebuilt from data/packed/*.gz or the raw export)
+data/*.json
+data/*.ndjson
+*.zip
+
+# local tooling / scratch
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.log
+docs/archive
+teable
+teable.md
+schema
+TEST_ACCOUNTS.md

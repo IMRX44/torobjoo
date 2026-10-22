@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+data/store
+data/*.json
+data/*.ndjson
+*.zip
+.env
+.env.*
+!.env.example
+tsconfig.tsbuildinfo
+docs/archive
+teable
+schema
+TEST_ACCOUNTS.md
