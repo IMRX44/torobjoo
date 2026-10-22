@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { SlidersHorizontal, X, ChevronLeft, LoaderCircle, SearchX } from "lucide-react";
+import { SlidersHorizontal, X, ChevronLeft, LoaderCircle, SearchX, Sparkles, Map as MapIcon } from "lucide-react";
+import SizeGuide from "@/components/tj/size-guide";
 import Shell from "@/components/tj/shell";
 import ProductCard, { CardSkeleton, toman } from "@/components/tj/product-card";
 import AssistantDock from "@/components/tj/assistant-dock";
@@ -12,7 +13,7 @@ import { categoryHref } from "@/components/tj/header";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { num, type Row } from "@/lib/shopping";
 
-const KEYS = ["q", "category", "group", "hub", "brand", "size", "min", "max", "sort", "payment", "radius", "cheap", "phone_type"] as const;
+const KEYS = ["q", "category", "group", "hub", "brand", "size", "min", "max", "sort", "payment", "radius", "cheap", "phone_type", "f"] as const;
 type Filters = Partial<Record<(typeof KEYS)[number], string>>;
 const SORTS = [
   ["best", "مرتبط‌ترین"],
@@ -43,8 +44,13 @@ export function intentToFilters(intent: Row): Filters {
     radius: intent.radius ? String(intent.radius) : undefined,
     cheap: intent.cheap && intent.max == null ? "1" : undefined,
     phone_type: intent.phone_type || undefined,
+    f: intent.features || undefined,
   };
 }
+/** "رم:۸ گیگ|حافظه:۲۵۶ گیگ" ⇄ Map(name → value); one value per filter. */
+const parseF = (v?: string) => new Map((v || "").split("|").map((x) => x.split(":")).filter((x) => x[0] && x[1]) as [string, string][]);
+const joinF = (m: Map<string, string>) => [...m].map(([k, v]) => `${k}:${v}`).join("|") || undefined;
+const SHOE = /کفش|کتانی|صندل|دمپایی|بوت/;
 
 function PriceFilter({ f, set }: { f: Filters; set: (p: Filters) => void }) {
   const [lo, setLo] = useState(f.min ? String(Number(f.min) / 1e6) : ""),
@@ -80,6 +86,39 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div className="border-b border-tj-line py-4 last:border-0">
       <p className="mb-3 text-sm font-bold">{title}</p>
       {children}
+    </div>
+  );
+}
+
+/** The category's own filters as one-tap chips above the results (no need to open the filter panel). */
+function QuickSpecs({ f, set, specs }: { f: Filters; set: (p: Filters) => void; specs: Row }) {
+  const chosen = parseF(f.f);
+  return (
+    <div className="mt-3 space-y-1.5 border-t border-tj-line pt-3 lg:hidden">
+      {specs.groups.slice(0, 2).map((g: Row) => (
+        <div key={g.key} className="tj-no-scrollbar flex items-center gap-1.5 overflow-x-auto">
+          <span className="ml-1 flex shrink-0 items-center gap-1 text-xs font-bold text-tj">
+            <Sparkles size={12} /> {g.key}:
+          </span>
+          {g.values.slice(0, 8).map((x: Row) => {
+            const on = chosen.get(g.key) === x.v;
+            return (
+              <button
+                key={x.v}
+                onClick={() => {
+                  const next = new Map(chosen);
+                  if (on) next.delete(g.key);
+                  else next.set(g.key, x.v);
+                  set({ f: joinF(next), ...(f.category ? {} : { category: specs.category, group: undefined, brand: f.brand, size: f.size }) });
+                }}
+                className={`shrink-0 rounded-full border px-3 py-1 text-xs transition ${on ? "border-tj bg-tj text-white" : "border-tj-line hover:border-tj hover:text-tj"}`}
+              >
+                {x.v}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -125,6 +164,42 @@ function FilterPanel({ f, set, facets }: { f: Filters; set: (p: Filters) => void
           </p>
         )}
       </Section>
+      {facets?.specs?.groups?.length > 0 && (
+        <div className="-mx-4 border-b border-tj-line bg-gradient-to-b from-tj-soft/60 to-transparent px-4 pt-4">
+          <p className="flex items-center gap-1.5 text-sm font-bold text-tj">
+            <Sparkles size={15} /> فیلترهای مخصوص {facets.specs.category}
+          </p>
+          <p className="mt-1 text-[11px] text-tj-muted">از عنوان و مشخصات کالاها استخراج شده؛ عدد کنار هر گزینه تعداد کالای همین نتایج است.</p>
+          {facets.specs.groups.map((g: Row) => {
+            const chosen = parseF(f.f);
+            return (
+              <div key={g.key} className="py-3">
+                <p className="mb-2 text-xs font-bold">{g.key}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {g.values.map((x: Row) => {
+                    const on = chosen.get(g.key) === x.v;
+                    return (
+                      <button
+                        key={x.v}
+                        onClick={() => {
+                          const next = new Map(chosen);
+                          if (on) next.delete(g.key);
+                          else next.set(g.key, x.v);
+                          set({ f: joinF(next), ...(f.category ? {} : { category: facets.specs.category, group: undefined, brand: f.brand, size: f.size }) });
+                        }}
+                        className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition ${on ? "border-tj bg-tj text-white" : "border-tj-line bg-white hover:border-tj"}`}
+                      >
+                        {x.v}
+                        <span className={on ? "text-white/80" : "text-tj-muted"}>{num(x.n)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {(facets?.sizes?.length > 0 || f.size) && (
         <Section title="سایز">
           <div className="flex flex-wrap gap-1.5">
@@ -134,6 +209,7 @@ function FilterPanel({ f, set, facets }: { f: Filters; set: (p: Filters) => void
               </button>
             ))}
           </div>
+          <SizeGuide kind={SHOE.test(f.category || f.q || facets?.categories?.[0]?.name || "") ? "shoes" : "clothes"} sizes={(facets?.sizes || []).map((z: Row) => z.name)} />
         </Section>
       )}
       {facets?.brands?.length > 0 && (
@@ -189,6 +265,7 @@ export default function SearchPage() {
       if ("category" in patch || "group" in patch) {
         if (!("brand" in patch)) next.brand = undefined;
         if (!("size" in patch)) next.size = undefined;
+        if (!("f" in patch)) next.f = undefined;
       }
       const url = `${pathname}?${filtersToParams(next).toString()}`;
       // Filters live only in the query string: update it in place (Next syncs useSearchParams with
@@ -244,6 +321,7 @@ export default function SearchPage() {
     ...(f.phone_type ? [["phone_type", f.phone_type === "smart" ? "گوشی هوشمند" : "گوشی ساده"] as [keyof Filters, string]] : []),
     ...(f.hub ? [["hub", "مرکز خرید انتخابی"] as [keyof Filters, string]] : []),
   ];
+  const featureChips = [...parseF(f.f)];
   return (
     <Shell>
       <main className="mx-auto max-w-[1440px] px-3 pt-4 lg:px-8">
@@ -285,11 +363,31 @@ export default function SearchPage() {
                   </button>
                 ))}
               </div>
-              {chips.length > 0 && (
+              {facets?.specs?.groups?.length > 0 && <QuickSpecs f={f} set={set} specs={facets.specs} />}
+              {(top || facets?.categories?.[0]?.top) && (
+                <Link href={`/map?group=${top?.id || facets.categories[0].top}`} className="mt-3 flex items-center gap-1.5 text-xs text-tj-muted hover:text-tj">
+                  <MapIcon size={14} className="text-tj" /> بورس {top?.name || "این دسته"} در تهران کجاست؟ <ChevronLeft size={13} />
+                </Link>
+              )}
+              {chips.length + featureChips.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {chips.map(([k, label]) => (
                     <button key={k} onClick={() => set({ [k]: undefined })} className="flex items-center gap-1 rounded-full bg-tj-page px-3 py-1 text-xs hover:bg-tj-soft hover:text-tj">
                       {label}
+                      <X size={12} />
+                    </button>
+                  ))}
+                  {featureChips.map(([k, v]) => (
+                    <button
+                      key={"f:" + k}
+                      onClick={() => {
+                        const m = parseF(f.f);
+                        m.delete(k);
+                        set({ f: joinF(m) });
+                      }}
+                      className="flex items-center gap-1 rounded-full bg-tj-soft px-3 py-1 text-xs text-tj hover:bg-tj hover:text-white"
+                    >
+                      {k}: {v}
                       <X size={12} />
                     </button>
                   ))}
@@ -366,6 +464,7 @@ export default function SearchPage() {
           radius: Number(f.radius || DEFAULT_RADIUS),
           cheap: f.cheap === "1",
           phone_type: f.phone_type || null,
+          features: f.f || null,
         }}
         resultIds={items.slice(0, 8).map((p) => p.product_id)}
         onIntent={(intent) => set({ ...intentToFilters(intent), group: intent.category ? undefined : f.group, hub: f.hub }, true)}

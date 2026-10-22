@@ -2,7 +2,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, LayoutGrid, Sparkles, Route, Store } from "lucide-react";
+import { Home, LayoutGrid, Sparkles, Route, Store, Map as MapIcon } from "lucide-react";
 import Header from "@/components/tj/header";
 import { Wordmark } from "@/components/tj/brand";
 import { useApp } from "@/components/tj/app-context";
@@ -23,11 +23,12 @@ function IncognitoBar() {
   );
 }
 
-function BottomNav() {
+export function BottomNav() {
   const path = usePathname();
   const items = [
     { href: "/", label: "خانه", icon: Home },
     { href: "/search", label: "دسته‌ها", icon: LayoutGrid },
+    { href: "/map", label: "نقشه", icon: MapIcon },
     { href: "/chat", label: "دستیار", icon: Sparkles },
     { href: "/plan", label: "برنامه", icon: Route },
   ];
@@ -48,7 +49,7 @@ function BottomNav() {
 
 export function Footer() {
   return (
-    <footer className="mt-14 border-t border-tj-line bg-white pb-20 lg:pb-0">
+    <footer className="mt-14 hidden border-t border-tj-line bg-white lg:block">
       <div className="mx-auto grid max-w-[1440px] gap-8 px-4 py-10 sm:grid-cols-3 lg:px-8">
         <div>
           <Wordmark size={34} />
@@ -86,6 +87,7 @@ export default function Shell({ children, footer = true, minimal = false }: { ch
       </Suspense>
       {children}
       {footer && <Footer />}
+      {footer && <div className="h-20 lg:hidden" aria-hidden />}
       <CompareBar />
       <BottomNav />
     </div>

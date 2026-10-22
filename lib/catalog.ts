@@ -23,7 +23,10 @@ export type Catalog = {
   /** Leaf category names under a top id ("fashion") or "top/sub" path. */
   leaves(path: string): string[];
   place(category: string): { top?: TopCategory; sub?: string };
+  /** Category-specific filters (RAM for phones, watts for chargers, …); products carry `attrs` = "|key.value|…". */
+  facets(category: string | undefined): Facet[];
 };
+export type Facet = { key: string; values: { v: string; n: number }[] };
 
 const dir = path.join(process.cwd(), "data");
 const read = (name: string) => JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
@@ -64,6 +67,15 @@ function load(): Catalog {
     if (list) list.push(o);
     else byProduct.set(o.product_id, [o]);
   }
+  // Built by scripts/build-facets.mjs; optional so an older data folder still loads.
+  const facetFile = path.join(dir, "facets.json");
+  const facets: { cats: Record<string, Facet[]>; attrs: Record<string, string> } = fs.existsSync(facetFile)
+    ? read("facets.json")
+    : { cats: {}, attrs: {} };
+  for (const [id, a] of Object.entries(facets.attrs)) {
+    const p = productById.get(id);
+    if (p) p.attrs = a;
+  }
   const topById = new Map<string, TopCategory>(taxonomy.top.map((t: TopCategory) => [t.id, t]));
   const leavesByPath = new Map<string, string[]>();
   for (const c of categories) {
@@ -88,6 +100,7 @@ function load(): Catalog {
     offersOf: (id) => byProduct.get(id) || [],
     details: productDetails,
     leaves: (p) => leavesByPath.get(p) || [],
+    facets: (category) => (category && facets.cats[category]) || [],
     place: (category) => {
       const [top, sub] = taxonomy.map[category] || [];
       return { top: topById.get(top), sub };
@@ -124,6 +137,6 @@ export function productDetails(p: Row): { specs: Row[]; images: string[] } {
 
 /** Product without server-only index fields, safe to send to the browser or the model. */
 export function publicProduct(p: Row, details = false): Row {
-  const { search_text, detail_offset, detail_length, ...rest } = p;
+  const { search_text, detail_offset, detail_length, attrs, ...rest } = p;
   return details ? { ...rest, ...productDetails(p) } : rest;
 }

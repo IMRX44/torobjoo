@@ -18,6 +18,7 @@ const searchSchema = z.object({
   brand: z.string().max(60).nullable().optional(),
   cheap: z.boolean().nullable().optional(),
   phone_type: z.enum(["smart", "basic"]).nullable().optional(),
+  features: z.string().max(300).nullable().optional(),
   sort: z.enum(["best", "cheap", "expensive", "near"]).optional(),
   radius: z.number().min(0.1).max(30).optional(),
   payment: z.boolean().optional(),
@@ -78,6 +79,11 @@ const definitions: Record<string, { description: string; properties: Row; requir
       brand: { type: ["string", "null"], description: "brand name as written in the catalog, e.g. سامسونگ, Nike" },
       cheap: { type: ["boolean", "null"], description: "buyer wants economical options but gave no number («ارزون», «پول ندارم», «اقتصادی»). Sticky: stays on in later searches until a budget is given or set false." },
       phone_type: { type: ["string", "null"], enum: ["smart", "basic", null], description: "phones only: smart = هوشمند/اندرویدی, basic = دکمه‌ای/ساده" },
+      features: {
+        type: ["string", "null"],
+        description:
+          "category-specific filters as \"name:value|name:value\", using exactly the names listed in available_filters of a previous search in the same category (e.g. \"رم:۸ گیگ|حافظه:۲۵۶ گیگ\" for phones, \"توان:۲۵ تا ۴۴ وات (فست)|درگاه:USB-C\" for chargers, \"مخاطب:مردانه|کاربرد:طبی / راحتی\" for shoes). Set null to clear.",
+      },
       sort,
       radius: num,
       payment: { type: "boolean" },
@@ -193,9 +199,12 @@ export function createTools(
     // A new budget replaces the old range: «تا ۴۰» after «۷۰ تا ۹۰» must not keep min = 70.
     if ("max" in patch && !("min" in patch)) patch = { ...patch, min: null };
     if ("min" in patch && !("max" in patch)) patch = { ...patch, max: null };
+    const before = intent.category;
     intent = { ...intent, ...patch };
     if (patch.category !== undefined)
       intent.category = resolveCategory(d, patch.category) ?? patch.category;
+    // Category filters (RAM, watts…) mean nothing in another category.
+    if (intent.category !== before && !("features" in patch)) intent.features = null;
     emit("intent", intent);
   };
   const product = (value: string) => {
@@ -233,9 +242,11 @@ export function createTools(
       const patch = Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined));
       if (Object.keys(patch).length) setIntent(patch);
       else emit("intent", intent);
-      const { total, items } = searchProducts(d, intent);
+      const { total, items, facets } = searchProducts(d, intent, { facets: true });
       emit("ui_block", { kind: "products", products: items, total });
-      return { total_matching: total, shown: items.map(brief), constraints: intent };
+      // The category's own filters (RAM, watts, audience…) so the next turn can narrow precisely.
+      const available_filters = facets?.specs?.groups.map((g: Row) => `${g.key}: ${g.values.map((x: Row) => x.v).join(" / ")}`);
+      return { total_matching: total, shown: items.map(brief), constraints: intent, ...(available_filters?.length ? { available_filters } : {}) };
     }
     if (name === "compare_products") {
       const ps = a.ids.map((id: string) => {

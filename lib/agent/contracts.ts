@@ -21,6 +21,8 @@ export const intentSchema = z
     // says price doesn't matter. Shows the cheaper part of the same kind of product.
     cheap: z.boolean().nullable().optional(),
     phone_type: z.enum(["smart", "basic"]).nullable().optional(),
+    // Category-specific filters as "name:value|name:value", e.g. "رم:۸ گیگ|حافظه:۲۵۶ گیگ".
+    features: z.string().max(300).nullable().optional(),
     sort: z.enum(["best", "cheap", "expensive", "near"]).optional(),
   })
   .strict();
@@ -248,6 +250,26 @@ export function validOffers(p: Row, d: Catalog, i: Row) {
         : (a.price_toman ?? Infinity) - (b.price_toman ?? Infinity),
     );
 }
+/** "رم:۸ گیگ|حافظه:۲۵۶ گیگ" → [["رم","۸ گیگ"],["حافظه","۲۵۶ گیگ"]] */
+export function parseFeatures(s?: string | null): [string, string][] {
+  return String(s || "")
+    .split("|")
+    .map((x) => x.split(":").map((t) => t.trim()) as [string, string])
+    .filter(([k, v]) => k && v);
+}
+const looseKey = (s: string) => norm(s).replace(/[\s‌\-_/()]/g, "");
+/**
+ * Category filters as `|key.value|` tokens. Names are matched loosely («۸ گیگ» = «8گیگ»), so
+ * values the assistant writes slightly differently still apply. Unknown names match nothing.
+ */
+function featureTokens(d: Catalog, category: string | undefined, features: [string, string][]) {
+  const defs = d.facets(category);
+  return features.map(([k, v]) => {
+    const ki = defs.findIndex((f) => looseKey(f.key) === looseKey(k));
+    const vi = ki < 0 ? -1 : defs[ki].values.findIndex((x) => looseKey(x.v) === looseKey(v));
+    return vi < 0 ? null : `|${ki}.${vi}|`;
+  });
+}
 type Hit = { p: Row; min: number | null; count: number; near: number; relevance: number };
 // Recent ranked lists, so paging and repeated questions skip the 330k-offer scan.
 const recent = new Map<string, Hit[]>();
@@ -261,7 +283,7 @@ export function searchProducts(
   if (intent.category && !i.category) return { total: 0, items: [] as Row[], facets: undefined as Row | undefined };
   const q = tokens(i.query),
     o0 = origin(i),
-    key = JSON.stringify([d.meta.builtAt, q, i.category, i.group, i.hub, !!i.cheap, i.phone_type, i.brand, normSize(i.size), i.min, i.max, !!i.payment, i.radius ?? 3, o0.lat, o0.lon, i.sort]);
+    key = JSON.stringify([d.meta.builtAt, q, i.category, i.group, i.hub, !!i.cheap, i.phone_type, i.brand, normSize(i.size), i.features, i.min, i.max, !!i.payment, i.radius ?? 3, o0.lat, o0.lon, i.sort]);
   const found = recent.get(key) ?? rank(d, i, q, o0);
   recent.delete(key);
   recent.set(key, found);
@@ -272,11 +294,40 @@ export function searchProducts(
       const { search_text, detail_offset, detail_length, ...rest } = p;
       return { ...rest, matching_min_price: min, matching_count: count, nearest_distance: near } as Row;
     }),
-    facets: facets ? facetsOf(d, found) : undefined,
+    facets: facets ? facetsOf(d, found, i) : undefined,
   };
 }
+/**
+ * The category-specific filters for a result list, with counts: shown when the results are
+ * (mostly) one category. Selected values stay visible even when nothing else matches them.
+ */
+export function specFacets(d: Catalog, found: { p: Row }[], i: Row) {
+  let category = i.category as string | undefined;
+  if (!category) {
+    const counts = new Map<string, number>();
+    for (const { p } of found) counts.set(p.category_name, (counts.get(p.category_name) || 0) + 1);
+    const [top, n] = [...counts].sort((a, b) => b[1] - a[1])[0] || [];
+    if (top && n >= found.length * 0.5) category = top;
+  }
+  const defs = d.facets(category);
+  if (!category || !defs.length) return null;
+  const chosen = new Map(parseFeatures(i.features).map(([k, v]) => [looseKey(k), looseKey(v)]));
+  const groups = defs.map((f, ki) => {
+    const counts = f.values.map(() => 0);
+    for (const { p } of found)
+      if (p.category_name === category && p.attrs)
+        for (let vi = 0; vi < f.values.length; vi++) if (p.attrs.includes(`|${ki}.${vi}|`)) counts[vi]++;
+    return {
+      key: f.key,
+      values: f.values
+        .map((x, vi) => ({ v: x.v, n: counts[vi], on: chosen.get(looseKey(f.key)) === looseKey(x.v) }))
+        .filter((x) => x.n > 0 || x.on),
+    };
+  });
+  return { category, groups: groups.filter((g) => g.values.length > 1 || g.values.some((x) => x.on)) };
+}
 /** Filter options for a result list: brands, leaf categories, sizes and the price span. */
-function facetsOf(d: Catalog, found: Hit[]) {
+function facetsOf(d: Catalog, found: Hit[], i: Row) {
   const brands = new Map<string, number>(),
     cats = new Map<string, number>(),
     sizes = new Map<string, number>();
@@ -305,6 +356,7 @@ function facetsOf(d: Catalog, found: Hit[]) {
       .sort((a, b) => (isNaN(+a[0]) || isNaN(+b[0]) ? order.indexOf(a[0]) - order.indexOf(b[0]) : +a[0] - +b[0]))
       .map(([name, count]) => ({ name, count })),
     price: lo === Infinity ? null : { min: lo, max: hi },
+    specs: specFacets(d, found, i),
   };
 }
 function rank(d: Catalog, i: Row, q: string[], o0: { lat: number; lon: number }) {
@@ -318,6 +370,11 @@ function rank(d: Catalog, i: Row, q: string[], o0: { lat: number; lon: number })
     size = normSize(i.size),
     group = i.group ? new Set(d.leaves(i.group)) : null,
     brand = i.brand ? norm(i.brand) : null;
+  // Filters belong to one category: with no category chosen, use the one they were picked from.
+  const features = parseFeatures(i.features);
+  const featureCategory =
+    i.category || (features.length ? d.categories.map((c) => c.name).find((c) => featureTokens(d, c, features).every(Boolean)) : undefined);
+  const want = features.length ? featureTokens(d, featureCategory, features) : [];
   const isMatch = (id: string) => {
     let ok = matched.get(id);
     if (ok === undefined) {
@@ -329,6 +386,7 @@ function rank(d: Catalog, i: Row, q: string[], o0: { lat: number; lon: number })
         (!group || group.has(p.category_name)) &&
         (!brand || norm(p.brand_name || "") === brand || hay.includes(brand)) &&
         (!size || String(p.sizes || "").includes("|" + size + "|")) &&
+        (!want.length || (p.category_name === featureCategory && want.every((t) => t && String(p.attrs || "").includes(t)))) &&
         tests.every((test) => test(hay));
       matched.set(id, ok);
     }

@@ -13,3 +13,7 @@ docs/archive
 teable
 schema
 TEST_ACCOUNTS.md
+.git
+docs
+data/sources
+README.md

@@ -40,3 +40,17 @@ export const arrivalLabel = (arrival?: string | null) => {
   const day = { tomorrow: "فردا", sat: "شنبه", sun: "یکشنبه", mon: "دوشنبه", tue: "سه‌شنبه", wed: "چهارشنبه", thu: "پنجشنبه", fri: "جمعه" }[m[1] as string] || (h < 5 || h >= 21 ? "امشب" : "امروز");
   return `${day} ساعت ${m[2].replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d])}`;
 };
+/** «۵ دقیقه پیش» / «۳ روز پیش»: how fresh a price, answer or hours entry is. */
+export function ago(v: any, now = Date.now()): string {
+  const t = Date.parse(v);
+  if (!v || Number.isNaN(t)) return "نامشخص";
+  const m = Math.max(0, (now - t) / 60000), n = (x: number) => Math.round(x).toLocaleString("fa-IR");
+  if (m < 2) return "همین الان";
+  if (m < 60) return `${n(m)} دقیقه پیش`;
+  if (m < 60 * 24) return `${n(m / 60)} ساعت پیش`;
+  if (m < 60 * 24 * 14) return `${n(m / 1440)} روز پیش`;
+  if (m < 60 * 24 * 60) return `${n(m / 10080)} هفته پیش`;
+  return `${n(m / 43200)} ماه پیش`;
+}
+/** Age of a timestamp in days (Infinity when unknown). */
+export const ageDays = (v: any, now = Date.now()) => (v && !Number.isNaN(Date.parse(v)) ? (now - Date.parse(v)) / 864e5 : Infinity);

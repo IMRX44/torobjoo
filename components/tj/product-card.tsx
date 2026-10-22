@@ -23,10 +23,8 @@ export default function ProductCard({ p, compact = false, onOpen }: { p: Row; co
     >
       <div className={`relative mb-2.5 flex items-center justify-center overflow-hidden rounded-lg bg-white ${compact ? "h-32" : "h-44"}`}>
         <ProductImage src={p.image_url} alt={p.persian_title} className="h-full w-full transition duration-300 group-hover:scale-[1.04] motion-reduce:transform-none" />
-        <CompareToggle p={p} className="absolute left-0 top-0 opacity-90 group-hover:opacity-100" />
-        {p.reason && (
-          <span className="absolute right-0 top-0 max-w-full truncate rounded-md bg-white/90 px-1.5 py-0.5 text-[10px] text-tj-muted shadow-sm">{p.reason}</span>
-        )}
+        {/* Hover-only on desktop to keep the grid calm; always visible on touch screens. */}
+        <CompareToggle p={p} className="absolute left-0 top-0 transition lg:opacity-0 lg:group-hover:opacity-100 lg:focus-visible:opacity-100 lg:aria-pressed:opacity-100" />
       </div>
       <h3 className={`line-clamp-2 font-medium leading-6 text-tj-ink ${compact ? "min-h-12 text-[12.5px]" : "min-h-12 text-[13.5px]"}`}>
         <bdi>{p.persian_title}</bdi>

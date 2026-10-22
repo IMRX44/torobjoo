@@ -28,6 +28,7 @@ import Shell from "@/components/tj/shell";
 import ProductCard, { CardSkeleton, toman, km } from "@/components/tj/product-card";
 import ProductImage from "@/components/product-image";
 import AssistantDock from "@/components/tj/assistant-dock";
+import SizeGuide from "@/components/tj/size-guide";
 import { useApp, useDwell } from "@/components/tj/app-context";
 import { categoryHref } from "@/components/tj/header";
 import { addToPlan, getPlan } from "@/components/tj/plan";
@@ -35,7 +36,7 @@ import { useInquiryWatch } from "@/components/tj/use-inquiry-watch";
 import { CompareToggle } from "@/components/tj/compare";
 import { useRouter } from "next/navigation";
 import { intentToFilters, filtersToParams } from "@/components/tj/search-page";
-import { arrivalDate, dateLabel, hours, num, type Row } from "@/lib/shopping";
+import { ageDays, ago, arrivalDate, dateLabel, hours, num, type Row } from "@/lib/shopping";
 
 const VISITS = [
   ["now", "الان"],
@@ -80,26 +81,66 @@ function PriceMeter({ m, mark }: { m: NonNullable<ReturnType<typeof marketOf>>; 
   const span = m.max - m.min || 1;
   const at = (v: number) => `${((v - m.min) / span) * 100}%`;
   return (
-    <div className="rounded-xl border border-tj-line p-4">
-      <p className="mb-3 text-xs font-bold">سنجهٔ قیمت منصفانه · {num(m.n)} فروشنده</p>
-      <div className="relative h-2.5 rounded-full bg-gradient-to-l from-tj/70 via-amber-300 to-tj-green/80" dir="ltr">
-        <span className="absolute -top-1 h-4.5 w-0.5 bg-tj-ink" style={{ left: at(m.median) }} title="میانه" />
+    <div>
+      <div className="relative h-2 rounded-full bg-gradient-to-l from-tj/60 via-amber-200 to-tj-green/70" dir="ltr" title={`ارزان‌ترین ${num(m.min)} · گران‌ترین ${num(m.max)}`}>
         <span className="absolute inset-y-0 rounded-full border-2 border-white/90" style={{ left: at(m.p25), width: `calc(${at(m.p75)} - ${at(m.p25)})` }} />
         {mark != null && (
-          <span className="absolute -top-1.5 grid size-5 -translate-x-1/2 place-items-center rounded-full border-2 border-white bg-tj-ink text-[9px] text-white shadow" style={{ left: at(Math.min(m.max, Math.max(m.min, mark))) }}>
-            ●
-          </span>
+          <span className="absolute -top-1 size-4 -translate-x-1/2 rounded-full border-2 border-white bg-tj-ink shadow" style={{ left: at(Math.min(m.max, Math.max(m.min, mark))) }} />
         )}
       </div>
-      {/* Same left-to-right order as the bar: cheapest on the left (green end). */}
-      <div className="mt-2 flex justify-between text-[11px] text-tj-muted" dir="ltr">
-        <span dir="rtl">ارزان‌ترین {num(Math.round(m.min / 1000))} هزار</span>
-        <span dir="rtl">میانه {num(Math.round(m.median / 1000))} هزار</span>
-        <span dir="rtl">گران‌ترین {num(Math.round(m.max / 1000))} هزار</span>
-      </div>
-      <p className="mt-2 text-xs leading-6">
-        قیمت منصفانه معمولاً بین <b>{toman(m.p25)}</b> و <b>{toman(m.p75)}</b> است.
+      <p className="mt-2 text-xs text-tj-muted">
+        قیمت منصفانه بین <b className="text-tj-ink">{toman(m.p25)}</b> و <b className="text-tj-ink">{toman(m.p75)}</b> · {num(m.n)} فروشنده
       </p>
+    </div>
+  );
+}
+
+const TONE = { good: "bg-[#eaf7ef] text-tj-green", warn: "bg-amber-50 text-amber-800", bad: "bg-tj-soft text-tj", none: "bg-tj-page text-tj-muted" } as const;
+/**
+ * Price · stock · hours, each tagged fresh / stale / unknown. A recent seller answer is shared with
+ * everyone (no need to ask again); old or missing data invites a question instead.
+ */
+function freshness(o: Row, open: string | undefined, when: string) {
+  const c = o.confirmed,
+    q = o.inquiry;
+  const priceAge = ageDays(o.last_price_changed_at);
+  const price: [keyof typeof TONE, string] = c && c.available !== false
+    ? ["good", `قیمت تأییدشده · ${ago(c.at)}`]
+    : o.price_flagged
+      ? ["warn", "قیمت غیرعادی؛ احتمالاً به‌روز نیست"]
+      : priceAge <= 7
+        ? ["good", `قیمت تازه · ${ago(o.last_price_changed_at)}`]
+        : priceAge <= 30
+          ? ["none", `قیمت · ${ago(o.last_price_changed_at)}`]
+          : ["warn", `قیمت قدیمی · ${ago(o.last_price_changed_at)}`];
+  const stock: [keyof typeof TONE, string] = c
+    ? c.available === false
+      ? ["bad", `ناموجود · ${ago(c.at)}`]
+      : ["good", `موجود · تأیید ${ago(c.at)}`]
+    : q?.status === "pending"
+      ? ["warn", q.reason === "price_check" ? "قیمت را از فروشنده پرسیده‌ایم" : "منتظر جواب فروشنده"]
+      : ["none", "موجودی نامعلوم"];
+  const hoursTag: [keyof typeof TONE, string] =
+    open === "باز" ? ["good", `${when} باز است`] : open === "بسته" ? ["bad", `${when} بسته است`] : ["warn", "ساعت کاری ثبت نشده"];
+  const recent = c && ageDays(c.at) < 1;
+  const stale = !c && q?.status !== "pending" && (priceAge > 30 || open === "نامشخص");
+  return { tags: [price, stock, hoursTag], recent, stale };
+}
+function Freshness({ o, open, when }: { o: Row; open?: string; when: string }) {
+  const { tags, recent } = freshness(o, open, when);
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap gap-1.5">
+        {tags.map(([tone, text]) => (
+          <span key={text} className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] ${TONE[tone]}`}>
+            {tone === "good" ? <BadgeCheck size={12} /> : tone === "warn" ? <AlertTriangle size={12} /> : <Clock size={12} />}
+            {text}
+          </span>
+        ))}
+        {o.confirmed?.simulated && <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">پاسخ نمایشی</span>}
+      </div>
+      {recent && <p className="mt-1.5 text-[11px] text-tj-green">کسی {ago(o.confirmed.at)} از این فروشنده پرسید و جواب گرفت؛ لازم نیست دوباره بپرسی.</p>}
+      {o.confirmed?.note && <p className="mt-1 text-[11px] text-tj-muted">«{o.confirmed.note}»</p>}
     </div>
   );
 }
@@ -147,7 +188,8 @@ export default function ProductPage({ id }: { id: string }) {
     [asking, setAsking] = useState<string | null>(null),
     [planned, setPlanned] = useState<string[]>([]),
     [active, setActive] = useState<string | undefined>(),
-    [allSpecs, setAllSpecs] = useState(false);
+    [allSpecs, setAllSpecs] = useState(false),
+    [allSellers, setAllSellers] = useState(false);
 
   useEffect(() => {
     setP(null);
@@ -313,32 +355,30 @@ export default function ProductPage({ id }: { id: string }) {
                 <h1 className="mt-1 text-xl font-bold leading-9 lg:text-2xl lg:leading-[1.7]">
                   <bdi>{p.persian_title}</bdi>
                 </h1>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-tj-page p-4">
-                    <p className="text-xs text-tj-muted">محدودهٔ قیمت در {num(p.offer_count)} فروشگاه</p>
-                    <p className="mt-1 text-lg font-black">
-                      {p.min_price != null ? toman(p.min_price) : "قیمت ثبت نشده"}
-                      {p.max_price != null && p.max_price !== p.min_price && <span className="text-sm font-normal text-tj-muted"> تا {num(p.max_price)}</span>}
-                    </p>
-                    <p className="mt-1 text-[11px] text-tj-muted">آخرین به‌روزرسانی: {dateLabel(p.latest_price_at)}</p>
-                  </div>
-                  <div className="rounded-xl border border-tj-green/30 bg-[#f1faf4] p-4">
-                    <p className="text-xs text-tj-green">ارزان‌ترین تا ۳ کیلومتری {origin.label}</p>
+                <div className="mt-4 rounded-2xl bg-tj-page p-4">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-tj-muted">از</p>
+                      <p className="text-2xl font-black">{p.min_price != null ? toman(p.min_price) : "قیمت ثبت نشده"}</p>
+                      <p className="mt-0.5 text-[11px] text-tj-muted">
+                        قیمت ثبت‌شده در {num(p.offer_count)} فروشگاه · {dateLabel(p.latest_price_at)}
+                      </p>
+                    </div>
                     {offers === null ? (
-                      <div className="mt-2 h-6 w-2/3 animate-pulse rounded bg-white" />
-                    ) : cheapestNear ? (
-                      <>
-                        <p className="mt-1 text-lg font-black">{toman(cheapestNear.price_toman)}</p>
-                        <p className="mt-1 truncate text-[11px] text-tj-muted">
-                          {cheapestNear.shop_name} · {km(cheapestNear.distance)}
-                        </p>
-                      </>
+                      <div className="h-10 w-40 animate-pulse rounded-xl bg-white" />
                     ) : (
-                      <p className="mt-2 text-sm text-tj-muted">نزدیک تو فروشنده‌ای ثبت نشده؛ نزدیک‌ترین‌ها پایین هستند.</p>
+                      cheapestNear && (
+                        <button onClick={() => { setActive(cheapestNear.offer_id); document.getElementById("sellers")?.scrollIntoView({ behavior: "smooth" }); }} className="rounded-xl bg-white px-3 py-2 text-right shadow-sm hover:ring-1 hover:ring-tj-green">
+                          <p className="text-[11px] text-tj-green">ارزان‌ترین نزدیک تو</p>
+                          <p className="text-sm font-bold">
+                            {toman(cheapestNear.price_toman)} <span className="font-normal text-tj-muted">· {km(cheapestNear.distance)}</span>
+                          </p>
+                        </button>
+                      )
                     )}
                   </div>
+                  {market && <div className="mt-4"><PriceMeter m={market} mark={cheapestNear?.price_toman} /></div>}
                 </div>
-                {market && <div className="mt-3"><PriceMeter m={market} mark={cheapestNear?.price_toman} /></div>}
                 <div className="mt-4 flex flex-wrap gap-2">
                   <a href="#sellers" className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-tj px-5 py-3 font-bold text-white hover:bg-tj-dark sm:flex-none">
                     <Store size={18} />
@@ -368,6 +408,28 @@ export default function ProductPage({ id }: { id: string }) {
                     <Share2 size={19} />
                   </button>
                 </div>
+                {p.top && (
+                  <Link href={`/map?group=${p.top.id}`} className="mt-3 flex items-center justify-between rounded-xl border border-tj-line px-3 py-2 text-xs hover:border-tj">
+                    <span>
+                      <b className="text-tj">بورس {p.top.name}</b> کجاست؟ محله‌ها و پاساژهای پرفروشنده روی نقشه
+                    </span>
+                    <ChevronLeft size={15} className="text-tj" />
+                  </Link>
+                )}
+                {p.features?.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-1.5">
+                    {p.features.map((x: Row) => (
+                      <Link
+                        key={x.key}
+                        href={`/search?category=${encodeURIComponent(p.category_name)}&f=${encodeURIComponent(x.key + ":" + x.value)}&radius=10`}
+                        className="rounded-full border border-tj-line px-3 py-1 text-xs hover:border-tj hover:text-tj"
+                        title={`${num(x.count)} کالای دیگر با همین ویژگی`}
+                      >
+                        <span className="text-tj-muted">{x.key}</span> <bdi className="font-bold">{x.value}</bdi>
+                      </Link>
+                    ))}
+                  </div>
+                )}
                 {p.sizes && (
                   <div className="mt-4">
                     <p className="mb-2 text-sm font-bold">سایزهای ثبت‌شده</p>
@@ -381,22 +443,7 @@ export default function ProductPage({ id }: { id: string }) {
                           </span>
                         ))}
                     </div>
-                  </div>
-                )}
-                {p.specs?.length > 0 && (
-                  <div className="mt-5">
-                    <p className="mb-2 text-sm font-bold">ویژگی‌های اصلی</p>
-                    <ul className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
-                      {p.specs
-                        .filter((s: Row) => s.value != null && String(s.value).length < 60)
-                        .slice(0, 8)
-                        .map((s: Row, i: number) => (
-                          <li key={i} className="flex gap-2">
-                            <span className="text-tj-muted">{s.key}:</span>
-                            <bdi className="truncate">{String(s.value)}</bdi>
-                          </li>
-                        ))}
-                    </ul>
+                    <SizeGuide kind={/کفش|کتانی|صندل|دمپایی|بوت/.test(p.category_name + p.persian_title) ? "shoes" : "clothes"} sizes={String(p.sizes).split("|").filter(Boolean)} />
                   </div>
                 )}
               </>
@@ -453,10 +500,10 @@ export default function ProductPage({ id }: { id: string }) {
               <p className="p-6 text-sm text-tj-muted">فروشندهٔ حضوری‌ای برای این کالا در تهران ثبت نشده.</p>
             ) : (
               <ul className="divide-y divide-tj-line">
-                {sorted.map((o, i) => {
+                {(allSellers ? sorted : sorted.slice(0, 6)).map((o, i) => {
                   const gone = o.confirmed?.available === false;
                   return (
-                    <li key={o.offer_id} onMouseEnter={() => setActive(o.offer_id)} className={`p-4 ${gone ? "opacity-55" : ""}`}>
+                    <li key={o.offer_id} id={"o-" + o.offer_id} onMouseEnter={() => setActive(o.offer_id)} onClick={() => setActive(o.offer_id)} className={`scroll-mt-40 p-4 transition-colors ${(active ?? nearest?.offer_id) === o.offer_id ? "bg-tj-page/70" : ""} ${gone ? "opacity-55" : ""}`}>
                       <div className="flex flex-wrap items-start gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -472,14 +519,14 @@ export default function ProductPage({ id }: { id: string }) {
                               <MapPin size={12} />
                               {km(o.distance)}
                             </span>
-                            <Hours h={openAt(o)} when={visitLabel} />
                             {o.warranty && (
-                              <span className="flex items-center gap-1 text-tj-muted">
-                                <ShieldCheck size={12} />
-                                {o.warranty}
+                              <span className="flex max-w-56 items-center gap-1 truncate text-tj-muted" title={o.warranty}>
+                                <ShieldCheck size={12} className="shrink-0" />
+                                <span className="truncate">{o.warranty}</span>
                               </span>
                             )}
                           </div>
+                          <Freshness o={o} open={openAt(o)} when={visitLabel} />
                         </div>
                         <div className="text-left">
                           <p className="text-lg font-black">{toman(o.price_toman)}</p>
@@ -491,9 +538,6 @@ export default function ProductPage({ id }: { id: string }) {
                             return tag && <span className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-[11px] ${tag.tone}`}>{tag.text}</span>;
                           })()}
                         </div>
-                      </div>
-                      <div className="mt-2">
-                        <SellerStatus o={o} />
                       </div>
                       {o.description && (
                         <details className="mt-2 text-xs">
@@ -518,18 +562,18 @@ export default function ProductPage({ id }: { id: string }) {
                             {planned.includes(o.offer_id) ? "در برنامه" : "افزودن به برنامه"}
                           </button>
                           {!o.confirmed && o.inquiry?.status !== "pending" && (
-                            <button disabled={asking === o.offer_id} onClick={() => askSeller(o)} className="flex items-center gap-1 rounded-lg border border-tj-line px-3 py-1.5 hover:border-tj hover:text-tj disabled:opacity-50">
+                            <button disabled={asking === o.offer_id} onClick={() => askSeller(o)} className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 disabled:opacity-50 ${freshness(o, openAt(o), visitLabel).stale ? "border-amber-300 bg-amber-50 text-amber-900 hover:border-amber-500" : "border-tj-line hover:border-tj hover:text-tj"}`}>
                               {asking === o.offer_id ? <LoaderCircle size={15} className="animate-spin" /> : <MessageCircleQuestion size={15} />}
-                              قیمت و موجودی را بپرس
+                              بپرس موجود است؟
                             </button>
                           )}
                           {o.phone && (
                             <a href={`tel:${o.phone}`} className="flex items-center gap-1 rounded-lg border border-tj-line px-3 py-1.5 hover:border-tj hover:text-tj">
-                              <Phone size={15} /> تماس
+                              <Phone size={15} /> <span className="sr-only">تماس</span>
                             </a>
                           )}
                           <a target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lon}`} className="flex items-center gap-1 rounded-lg border border-tj-line px-3 py-1.5 hover:border-tj hover:text-tj">
-                            <Navigation size={15} /> مسیریابی
+                            <Navigation size={15} /> <span className="sr-only">مسیریابی</span>
                           </a>
                         </div>
                       )}
@@ -538,14 +582,23 @@ export default function ProductPage({ id }: { id: string }) {
                 })}
               </ul>
             )}
+            {sorted.length > 6 && (
+              <button onClick={() => setAllSellers(!allSellers)} className="w-full border-t border-tj-line py-3 text-sm font-bold text-tj hover:bg-tj-page">
+                {allSellers ? "نمایش کمتر" : `نمایش همهٔ ${num(sorted.length)} فروشنده`}
+              </button>
+            )}
           </div>
-          <div className="h-80 overflow-hidden rounded-2xl border border-tj-line lg:sticky lg:top-36 lg:h-[520px]">
+          <div className="sticky top-[104px] z-10 order-first h-52 overflow-hidden rounded-2xl border border-tj-line shadow-sm lg:order-none lg:sticky lg:top-36 lg:h-[520px] lg:shadow-none">
             {offers && (
               <ShopMap
                 hubs={sorted.slice(0, 30).map((o) => ({ ...o, name: o.shop_name, label: o.price_toman ? `${num(Math.round(o.price_toman / 1000))}هزار` : undefined }))}
                 origin={origin}
                 activeId={active ?? nearest?.offer_id}
-                onSelect={(o) => document.getElementById("sellers")?.scrollIntoView({ behavior: "smooth" })}
+                onSelect={(o) => {
+                  setActive(o.offer_id);
+                  if (sorted.findIndex((x) => x.offer_id === o.offer_id) >= 6) setAllSellers(true);
+                  setTimeout(() => document.getElementById("o-" + o.offer_id)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+                }}
               />
             )}
           </div>

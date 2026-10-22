@@ -7,7 +7,7 @@ const fs = require("fs"),
 require.extensions[".ts"] = (m, f) =>
   m._compile(ts.transpile(fs.readFileSync(f, "utf8"), { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }), f);
 const lib = (p) => require(path.join(__dirname, "..", "lib", p));
-const { parseBudget, normSize, fallbackIntent } = lib("agent/contracts.ts");
+const { parseBudget, normSize, fallbackIntent, parseFeatures } = lib("agent/contracts.ts");
 const { checkMessage, leaksInstructions } = lib("agent/guard.ts");
 const { arrivalDate, hours, budget } = lib("shopping.ts");
 
@@ -65,4 +65,10 @@ test("free-text amounts", () => {
   assert.equal(budget("80 ملیون"), 80e6);
   assert.equal(budget("۳ میلیون و ۲۰۰ هزار"), 3.2e6);
   assert.equal(budget("70"), 70e6);
+});
+
+test("category filters", () => {
+  assert.deepEqual(parseFeatures("رم:۸ گیگ|حافظه:۲۵۶ گیگ"), [["رم", "۸ گیگ"], ["حافظه", "۲۵۶ گیگ"]]);
+  assert.deepEqual(parseFeatures("|بدون مقدار:|"), []);
+  assert.deepEqual(parseFeatures(null), []);
 });

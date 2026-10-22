@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import Header from "@/components/tj/header";
+import { BottomNav } from "@/components/tj/shell";
 import { Logo } from "@/components/tj/brand";
 import ProductCard, { toman, km } from "@/components/tj/product-card";
 import JourneyBoard from "@/components/journey-board";
@@ -248,13 +249,6 @@ export default function ChatApp() {
     else setSuggestions(["مسیر خریدم رو بچین", "نزدیک‌ترین کدومه؟"]);
   }, [live]);
 
-  const refreshHistory = useCallback(() => {
-    if (incognito) return setHistory([]);
-    listChats(signedIn).then(setHistory);
-  }, [signedIn, incognito]);
-  useEffect(() => {
-    if (ready) refreshHistory();
-  }, [ready, refreshHistory]);
   useEffect(() => {
     setPlans(getPlan());
     const sync = () => setPlans(getPlan());
@@ -269,16 +263,6 @@ export default function ChatApp() {
     setIntent((i) => ({ ...i, lat: origin.lat, lon: origin.lon, locationLabel: origin.label }));
   }, [origin.lat, origin.lon, origin.label]);
 
-  const persist = useCallback(
-    (state: Row, title: string) => {
-      if (incognito) return;
-      const meta = { id: chatId, title, createdAt: state.createdAt, updatedAt: new Date().toISOString() };
-      storeChat(signedIn, meta, state)
-        .then(refreshHistory)
-        .catch(() => {});
-    },
-    [chatId, incognito, signedIn, refreshHistory],
-  );
 
   function reset() {
     abort.current?.abort();
@@ -379,8 +363,6 @@ export default function ChatApp() {
       setPending(false);
       setActivity("");
       abort.current = null;
-      const first = next.find((t) => t.role === "user")?.text || value;
-      persist({ turns: next, ...live, createdAt }, String(first).slice(0, 60));
     }
   }
 
@@ -394,16 +376,6 @@ export default function ChatApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, params]);
 
-  const grouped = useMemo(() => {
-    const g: [string, ChatMeta[]][] = [];
-    for (const c of history) {
-      const label = groupLabel(c.updatedAt);
-      const last = g.at(-1);
-      if (last && last[0] === label) last[1].push(c);
-      else g.push([label, [c]]);
-    }
-    return g;
-  }, [history]);
   const selectedTitle = turns
     .flatMap((t) => t.blocks || [])
     .flatMap((b: Row) => b.products || [])
@@ -411,62 +383,10 @@ export default function ChatApp() {
   const budget = budgetLabel(intent.min, intent.max);
   const planIds = plans.map((p) => p.offer_id);
 
-  const historyPanel = (
-    <div className="flex h-full flex-col">
-      <div className="p-3">
-        <button onClick={reset} className="flex w-full items-center justify-center gap-2 rounded-xl bg-tj py-2.5 text-sm font-bold text-white hover:bg-tj-dark">
-          <Plus size={17} /> گفت‌وگوی تازه
-        </button>
-      </div>
-      <div className="tj-scroll flex-1 overflow-y-auto px-2 pb-3">
-        {incognito ? (
-          <p className="flex items-start gap-2 p-3 text-xs leading-6 text-tj-muted">
-            <EyeOff size={15} className="mt-1 shrink-0" />
-            حالت ناشناس: گفت‌وگوها ذخیره نمی‌شوند و تاریخچه‌ای ندارند.
-          </p>
-        ) : !history.length ? (
-          <p className="p-3 text-xs leading-6 text-tj-muted">هنوز گفت‌وگویی نداری. {signedIn ? "" : "گفت‌وگوها روی همین دستگاه ذخیره می‌شوند؛ با ورود، روی هر دستگاهی همراهت هستند."}</p>
-        ) : (
-          grouped.map(([label, items]) => (
-            <div key={label} className="mb-3">
-              <p className="px-2 pb-1 pt-2 text-[11px] font-bold text-tj-muted">{label}</p>
-              {items.map((c) => (
-                <div key={c.id} className={`group flex items-center rounded-lg ${c.id === chatId ? "bg-tj-soft" : "hover:bg-tj-page"}`}>
-                  <button onClick={() => open(c.id)} className={`min-w-0 flex-1 truncate px-2 py-2 text-right text-sm ${c.id === chatId ? "font-bold text-tj" : ""}`}>
-                    {c.title}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await removeChat(signedIn, c.id);
-                      if (c.id === chatId) reset();
-                      refreshHistory();
-                    }}
-                    className="ml-1 hidden size-7 place-items-center rounded-md text-tj-muted hover:text-tj group-hover:grid"
-                    aria-label="حذف گفت‌وگو"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-
   return (
-    <div className="flex h-dvh flex-col bg-tj-page text-tj-ink" dir="rtl">
+    <div className="flex h-dvh flex-col bg-tj-page pb-[calc(56px+env(safe-area-inset-bottom))] text-tj-ink lg:pb-0" dir="rtl">
       <Header minimal />
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 border-l border-tj-line bg-white md:block">{historyPanel}</aside>
-        {sidebar && (
-          <div className="fixed inset-0 z-40 bg-black/30 md:hidden" onClick={() => setSidebar(false)}>
-            <aside onClick={(e) => e.stopPropagation()} className="h-full w-72 bg-white">
-              {historyPanel}
-            </aside>
-          </div>
-        )}
         <section className="flex min-w-0 flex-1 flex-col">
           {turns.length > 0 && (() => {
             const blocksAll = turns.flatMap((t) => t.blocks || []);
@@ -489,9 +409,7 @@ export default function ChatApp() {
             );
           })()}
           <div className="flex items-center gap-2 border-b border-tj-line bg-white px-3 py-2">
-            <button onClick={() => setSidebar(true)} className="grid size-9 place-items-center rounded-lg hover:bg-tj-page md:hidden" aria-label="تاریخچه">
-              <MessageSquare size={18} />
-            </button>
+            <Sparkles size={17} className="shrink-0 text-tj" />
             <p className="min-w-0 flex-1 truncate text-sm font-bold">{turns.find((t) => t.role === "user")?.text || "دستیار خرید ترب‌جو"}</p>
             {modelDown && <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] text-amber-700">راهنمای ساده؛ هوش مصنوعی در دسترس نیست</span>}
             <button onClick={() => setJourney(!journey)} className="flex items-center gap-1.5 rounded-lg border border-tj-line px-2.5 py-1.5 text-xs hover:border-tj">
@@ -511,16 +429,13 @@ export default function ChatApp() {
             <div className="mx-auto max-w-3xl">
               {!turns.length && (
                 <div className="flex flex-col items-center pt-6 text-center lg:pt-14">
-                  <Logo size={64} />
+                  <Logo size={52} />
                   <h1 className="mt-4 text-2xl font-black">{user ? `سلام ${user.name}، چی لازم داری؟` : "سلام! چی می‌خوای بخری؟"}</h1>
-                  <p className="mt-2 max-w-md text-sm leading-7 text-tj-muted">
-                    بودجه، سایز یا مدلت را بگو تا از نزدیک‌ترین فروشگاه‌ها به {origin.label} پیدا کنم، مقایسه کنم و از فروشنده بپرسم.
-                  </p>
-                  <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
-                    {STARTERS.map(([q, sub]) => (
-                      <button key={q} onClick={() => send(q)} className="rounded-xl border border-tj-line bg-white p-4 text-right hover:border-tj">
-                        <p className="text-sm font-bold">{q}</p>
-                        <p className="mt-1 text-xs text-tj-muted">{sub}</p>
+                  <p className="mt-2 max-w-sm text-sm leading-7 text-tj-muted">بودجه و سایزت را هم بگو؛ از نزدیک‌ترین مغازه‌ها پیدا می‌کنم.</p>
+                  <div className="mt-6 flex w-full flex-wrap justify-center gap-2">
+                    {STARTERS.map(([q]) => (
+                      <button key={q} onClick={() => send(q)} className="rounded-full bg-white px-4 py-2 text-sm ring-1 ring-tj-line hover:text-tj hover:ring-tj">
+                        {q}
                       </button>
                     ))}
                   </div>
@@ -661,7 +576,7 @@ export default function ChatApp() {
                 )}
               </form>
               <p className="mt-1.5 text-center text-[11px] text-tj-muted">
-                {incognito ? "ناشناس: این گفت‌وگو ذخیره نمی‌شود." : signedIn ? "گفت‌وگو در حسابت ذخیره می‌شود." : "گفت‌وگو روی همین دستگاه ذخیره می‌شود."} قیمت‌ها ثبت‌شده‌اند؛ موجودی را بپرس.
+                قیمت‌ها ثبت‌شده‌اند؛ موجودی را از فروشنده بپرس.
               </p>
             </div>
           </div>
@@ -685,6 +600,7 @@ export default function ChatApp() {
           </aside>
         )}
       </div>
+      <BottomNav />
     </div>
   );
 }

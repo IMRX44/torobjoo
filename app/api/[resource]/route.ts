@@ -2,6 +2,7 @@ import { getCatalog, publicProduct } from "@/lib/catalog";
 import { resolveCategory, searchProducts, validOffers } from "@/lib/agent/contracts";
 import { offerView } from "@/lib/agent/tools";
 import { autoCheckPrices } from "@/lib/inquiries";
+import { bazaars } from "@/lib/bazaar";
 import { hours, json, norm, Row } from "@/lib/shopping";
 export const runtime = "nodejs";
 // Read-only catalog endpoints: search, product, offers, offer, categories, hubs, meta.
@@ -17,6 +18,7 @@ function intentFrom(u: URLSearchParams): Row {
     hub: u.get("hub") || null,
     cheap: u.get("cheap") === "1",
     phone_type: u.get("phone_type") === "smart" || u.get("phone_type") === "basic" ? u.get("phone_type") : null,
+    features: u.get("f")?.slice(0, 300) || null,
     min: n("min") ?? null,
     max: n("max") ?? null,
     // A chosen shopping centre is the place; the distance limit would only hide it.
@@ -59,7 +61,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ reso
         const p = d.product(id);
         if (!p) return Response.json({ error: "محصول پیدا نشد" }, { status: 404 });
         const place = d.place(p.category_name);
-        return Response.json({ ...publicProduct(p, true), top: place.top ? { id: place.top.id, name: place.top.name } : null, sub: place.sub ?? null });
+        // This product's values for its category's filters, e.g. [{key:"رم", value:"۸ گیگ", share: 0.14}].
+        const features = d.facets(p.category_name).flatMap((f, ki) => {
+          const vi = f.values.findIndex((_, vi) => String(p.attrs || "").includes(`|${ki}.${vi}|`));
+          if (vi < 0) return [];
+          const total = f.values.reduce((n, x) => n + x.n, 0);
+          return [{ key: f.key, value: f.values[vi].v, count: f.values[vi].n, share: f.values[vi].n / total }];
+        });
+        return Response.json({ ...publicProduct(p, true), features, top: place.top ? { id: place.top.id, name: place.top.name } : null, sub: place.sub ?? null });
       }
       case "offers": {
         const p = d.product(id);
@@ -91,6 +100,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ reso
       }
       case "category":
         return Response.json({ name: resolveCategory(d, u.get("q") || "") ?? null });
+      case "bazaar": {
+        // ?group=mobile | ?group=mobile/گوشی | ?category=<leaf>; optional lat/lon for distances.
+        const category = u.get("category") ? resolveCategory(d, u.get("category")!) : undefined;
+        const group = u.get("group") || "";
+        const leaves = category ? [category] : d.leaves(group);
+        if (!leaves.length) return Response.json({ error: "دسته پیدا نشد" }, { status: 404 });
+        const title = category || (group.includes("/") ? group.split("/")[1] : d.taxonomy.top.find((t) => t.id === group)?.name) || group;
+        const lat = Number(u.get("lat")) || 35.695, lon = Number(u.get("lon")) || 51.407;
+        const areas = bazaars(d, leaves).map((a) => ({ ...a, km: Math.round(Math.hypot((a.lat - lat) * 111, (a.lon - lon) * 90) * 10) / 10 }));
+        return Response.json({ title, areas });
+      }
       case "hubs":
         return Response.json(
           d.hubs.map((h) => ({ ...h, shop_count: d.shops.filter((s) => s.hub_id === h.hub_id).length })),
